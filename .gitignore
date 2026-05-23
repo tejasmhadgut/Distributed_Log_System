@@ -9,3 +9,6 @@ dist/
 build/
 .idea/
 .vscode/
+Project_Overview_and_Features.md
+Claude_Code_Session_Prompts.md
+./claude
