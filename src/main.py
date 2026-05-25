@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from src.models.log import Log
 from src.database import init_pool, close_pool, insert_logs, search_logs
 from src.cache import init_redis, close_redis, get_from_cache, set_in_cache
+from src.producer import send_log, init_producer, close_producer
 
 load_dotenv()
 
@@ -13,11 +14,14 @@ load_dotenv()
 async def lifespan(app: FastAPI):
     init_pool()
     init_redis()
-    print(" Database and Redis initialized")
+    # Don't initialize producer yet - do it lazily on first use
+    print("✓ Database and Redis initialized")
     yield
     close_pool()
     close_redis()
-    print(" Connections closed")
+    close_producer()
+    print("✓ Connections closed")
+
 
 
 app = FastAPI(title = "Log Analytics Platform", version="0.1.0", lifespan=lifespan)
@@ -29,8 +33,9 @@ async def health():
 @app.post("/logs/ingest")
 async def ingest_logs(logs: list[Log]):
     try:
-        inserted = insert_logs(logs)
-        return {"inserted":inserted}
+        for log in logs:
+            send_log(log.model_dump(mode='json'))
+        return {"inserted":len(logs)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     

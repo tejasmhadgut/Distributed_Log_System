@@ -52,6 +52,44 @@ def insert_logs(logs: list) -> int:
     
     return inserted
 
+def batch_insert_logs(logs: list) -> int:
+    if not logs:
+        return 0
+    
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        values = []
+        for log in logs:
+            values.append((
+                log['timestamp'],
+                log['service_name'],
+                log['log_level'],
+                log['message'],
+                log.get('request_id'),
+                log.get('user_id'),
+                log.get('latency_ms'),
+                log.get('metadata')
+            ))
+
+        cursor.executemany(
+                """INSERT INTO logs 
+                (timestamp, service_name, log_level, message, request_id, user_id, latency_ms, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                values
+            )
+        conn.commit()
+        inserted = len(logs)
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        return_connection(conn)
+    
+    return inserted
+
+
 def search_logs(service: str, level: str = None, hours: int = 1, limit: int = 100) -> list:
     conn = get_connection()
     cursor = conn.cursor()
