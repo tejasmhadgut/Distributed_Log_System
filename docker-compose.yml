@@ -9,7 +9,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U logs_user -d logs_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
   redis:
     image: redis:7-alpine
     ports:
@@ -40,11 +44,58 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     ports:
       - "9092:9092"
-    healthcheck:
-      test: ["CMD", "kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"]
-      interval: 5s
-      timeout: 10s
-      retries: 5
+    
+  
+  api:
+    build:
+      context: .
+      dockerfile:  Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://logs_user:logs_password@postgres:5432/logs_db
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - .:/app
+    
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      kafka:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://logs_user:logs_password@postgres:5432/logs_db
+    command: python -m src.consumer
+    volumes:
+      - .:/app
+
+  stream-processor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      kafka:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      DATABASE_URL: postgresql://logs_user:logs_password@postgres:5432/logs_db
+    command: python -m src.stream_processor
+    volumes:
+      - .:/app
 
 volumes:
   postgres_data:
