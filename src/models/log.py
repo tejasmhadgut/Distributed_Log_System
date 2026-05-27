@@ -11,3 +11,5 @@ class Log(BaseModel):
     user_id: Optional[str] = None
     latency_ms: Optional[int] = None
     metadata: Optional[Dict[str, Any]] = None
+    span_id: Optional[str] = None
+    parent_span_id: Optional[str] = None

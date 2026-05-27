@@ -7,6 +7,8 @@ from src.models.log import Log
 from src.database import init_pool, close_pool, insert_logs, search_logs
 from src.cache import init_redis, close_redis, get_from_cache, set_in_cache
 from src.producer import send_log, init_producer, close_producer
+from src.cache import get_cached_trace, cache_trace
+from src.database import get_trace
 
 load_dotenv()
 
@@ -67,3 +69,57 @@ async def search(service: str, level: str = None, hours: int =1, limit: int = 10
         return {"results": formatted, "source": "database"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/traces/{request_id}")
+async def get_trace_by_request_id(request_id: str, limit: int = 100, offset: int = 0):
+    try:
+        cache_key = f"trace:{request_id}:p{offset}:l{limit}"
+        cached = get_cached_trace(cache_key)
+        if cached:
+            cached["source"] = "cache"
+            return cached
+        
+        trace = get_trace(request_id, limit, offset)
+
+        if not trace:
+            raise HTTPException(status_code=404, detail="Request ID not found")
+        
+        trace["source"] = "database"
+
+        # Cache the result
+        cache_trace(cache_key, trace)
+
+        return trace
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("traces/{request_id}/summary")
+async def get_trace_summary(request_id: str):
+    try:
+        cached = get_cached_trace(f"trace-summary:{request_id}")
+        if cached:
+            return cached
+
+        trace = get_trace(request_id, limit=1)
+
+        if not trace:
+            raise HTTPException(status_code=404, detail="Request ID not found")
+        
+        summary = {
+            "request_id": request_id,
+            "total_spans": trace["total_spans"],
+            "services": trace["services_involved"],
+            "duration_ms": trace["total_duration_ms"],
+            "errors": trace["error_count"],
+            "slow_spans": trace["slow_span_count"],
+            "status": trace["status"]
+        }
+        cache_trace(f"trace-summary:{request_id}", summary)
+        return summary
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
