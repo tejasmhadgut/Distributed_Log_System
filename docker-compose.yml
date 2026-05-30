@@ -97,6 +97,21 @@ services:
     volumes:
       - .:/app
 
+  alert-processor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      kafka:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://logs_user:logs_password@postgres:5432/logs_db
+    command: python -m src.alert_processor
+    volumes:
+      - .:/app
+      
 volumes:
   postgres_data:
   redis_data:
