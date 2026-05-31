@@ -4,22 +4,24 @@ import json
 from dotenv import load_dotenv
 
 from src.models.log import Log
-from src.database import init_pool, close_pool, insert_logs, search_logs
+from src.database import init_pool, close_pool, init_archive_table
 from src.cache import init_redis, close_redis, get_from_cache, set_in_cache
 from src.producer import send_log, init_producer, close_producer
 from src.cache import get_cached_trace, cache_trace
-from src.database import get_trace
+from src.clickhouse_db import search_logs_ch, get_trace_ch
 from src.models.alert import AlertRuleCreate, AlertRuleUpdate, AlertRuleResponse, AlertResponse
 from src.database import (
-    create_alert_rule, get_alert_rules, get_alert_rule, 
+    create_alert_rule, get_alert_rules, get_alert_rule,
     update_alert_rule, delete_alert_rule, get_alerts, acknowledge_alert
 )
+
 load_dotenv()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_pool()
     init_redis()
+    init_archive_table()
     # Don't initialize producer yet - do it lazily on first use
     print("✓ Database and Redis initialized")
     yield
@@ -46,59 +48,85 @@ async def ingest_logs(logs: list[Log]):
         raise HTTPException(status_code=500, detail=str(e))
     
 @app.get("/logs/search")
-async def search(service: str, level: str = None, hours: int =1, limit: int = 100):
+async def search(service: str, level: str = None, hours: int = 1, limit: int = 100, tier: str = "hot"):
+    """
+    Search logs.
+    tier: hot (ClickHouse, <7 days), warm (S3, 7-90 days), cold (Glacier, 90-365 days)
+    """
     try:
-        cache_key = f"search:{service}:{level}:{hours}:{limit}"
+        if tier not in ["hot", "warm", "cold"]:
+            raise HTTPException(status_code=400, detail="tier must be 'hot', 'warm', or 'cold'")
+
+        cache_key = f"search:{service}:{level}:{hours}:{limit}:t{tier}"
         cached = get_from_cache(cache_key)
         if cached:
             return {"results": json.loads(cached), "source": "cache"}
-        
-        results = search_logs(service, level, hours, limit)
 
-        formatted = []
-        for row in results:
-            formatted.append({
-                "id": row[0],
-                "timestamp": row[1].isoformat(),
-                "service_name": row[2],
-                "log_level": row[3],
-                "message": row[4],
-                "request_id": row[5],
-                "user_id": row[6],
-                "latency_ms": row[7],
-                "metadata": row[8]
-            })
+        # Currently only hot tier queries ClickHouse
+        if tier == "hot":
+            results = search_logs_ch(service, level, hours, limit)
 
-        set_in_cache(cache_key, json.dumps(formatted), ttl=300)
-        return {"results": formatted, "source": "database"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    
-@app.get("/traces/{request_id}")
-async def get_trace_by_request_id(request_id: str, limit: int = 100, offset: int = 0):
-    try:
-        cache_key = f"trace:{request_id}:p{offset}:l{limit}"
-        cached = get_cached_trace(cache_key)
-        if cached:
-            cached["source"] = "cache"
-            return cached
-        
-        trace = get_trace(request_id, limit, offset)
+            formatted = []
+            for row in results:
+                formatted.append({
+                    "id": row[0],
+                    "timestamp": row[1].isoformat(),
+                    "service_name": row[2],
+                    "log_level": row[3],
+                    "message": row[4],
+                    "request_id": row[5],
+                    "user_id": row[6],
+                    "latency_ms": row[7],
+                    "metadata": row[8]
+                })
 
-        if not trace:
-            raise HTTPException(status_code=404, detail="Request ID not found")
-        
-        trace["source"] = "database"
+            set_in_cache(cache_key, json.dumps(formatted), ttl=300)
+            return {"results": formatted, "source": "database"}
+        else:
+            # warm/cold tiers: would search S3/Glacier
+            raise HTTPException(status_code=501, detail=f"Tier '{tier}' querying not yet implemented")
 
-        # Cache the result
-        cache_trace(cache_key, trace)
-
-        return trace
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+  
+@app.get("/traces/{request_id}")
+async def get_trace_by_request_id(request_id: str, limit: int = 100, offset: int = 0, tier: str = "hot"):
+    """
+    Get trace by request ID.
+    tier: hot (ClickHouse, <7 days), warm (S3, 7-90 days), cold (Glacier, 90-365 days)
+    """
+    try:
+        if tier not in ["hot", "warm", "cold"]:
+            raise HTTPException(status_code=400, detail="tier must be 'hot', 'warm', or 'cold'")
+
+        cache_key = f"trace:{request_id}:p{offset}:l{limit}:t{tier}"
+        cached = get_cached_trace(cache_key)
+        if cached:
+            cached["source"] = "cache"
+            return cached
+
+        # Currently only hot tier queries ClickHouse (warm/cold would query S3/Glacier)
+        if tier == "hot":
+            trace = get_trace_ch(request_id, limit, offset)
+
+            if not trace:
+                raise HTTPException(status_code=404, detail="Request ID not found")
+
+            trace["source"] = "database"
+            cache_trace(cache_key, trace)
+
+            return trace
+        else:
+            # warm/cold tiers: would restore from S3/Glacier
+            raise HTTPException(status_code=501, detail=f"Tier '{tier}' querying not yet implemented")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+ 
 @app.get("traces/{request_id}/summary")
 async def get_trace_summary(request_id: str):
     try:
@@ -106,7 +134,7 @@ async def get_trace_summary(request_id: str):
         if cached:
             return cached
 
-        trace = get_trace(request_id, limit=1)
+        trace = get_trace_ch(request_id, limit=1)
 
         if not trace:
             raise HTTPException(status_code=404, detail="Request ID not found")
@@ -244,3 +272,13 @@ async def receive_alert(alert: dict):
         return {"received": True, "alert_id": alert.get("alert_id")}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_pool()
+    init_redis()
+    from src.database import init_archive_table
+    init_archive_table()  # Add this
+    print("✓ Database and Redis initialized")
+    yield
+    ...

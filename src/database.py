@@ -11,92 +11,6 @@ TRACE_LATENCY_THRESHOLD = 500 # ms - considered slow
 
 connection_pool = None
 
-def get_trace(request_id: str, limit: int = 100, offset: int = 0) -> dict:
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        query = """
-            SELECT id, timestamp, service_name, log_level, message, latency_ms, span_id, parent_span_id
-            FROM logs
-            WHERE request_id = %s
-            ORDER BY timestamp ASC
-            LIMIT %s OFFSET %s
-        """
-        cursor.execute(query, (request_id, limit, offset))
-        results = cursor.fetchall()
-
-        if not results:
-            return None
-
-        # Get total count
-        cursor.execute("SELECT COUNT(*) FROM logs WHERE request_id = %s", (request_id,))
-        total_spans = cursor.fetchone()[0]
-
-        # Format spans with hierarchy
-        spans = []
-        services = set()
-        errors = 0
-        slow_spans = 0
-        min_time = None
-        max_time = None
-        for row in results:
-            span = {
-                "id": row[0],
-                "timestamp": row[1].isoformat() if row[1] else None,
-                "service_name": row[2],
-                "log_level": row[3],
-                "message": row[4],
-                "latency_ms": row[5],
-                "span_id": row[6],
-                "parent_span_id": row[7],
-                "children": []
-            }
-            spans.append(span)
-            services.add(row[2])
-
-            if row[3] == "ERROR":
-                errors += 1
-            if row[5] and row[5] > TRACE_LATENCY_THRESHOLD:
-                slow_spans +=1
-            if min_time is None or row[1] < min_time:
-                min_time = row[1]
-            if max_time is None or row[1] > max_time:
-                max_time = row[1]
-
-        if spans and spans[0].get('span_id'):
-            span_map = {s['span_id']: s for s in spans}
-            root_spans = []
-            for span in spans:
-                if span['parent_span_id'] and span['parent_span_id'] in span_map:
-                    span_map[span['parent_span_id']]['children'].append(span)
-                else:
-                    root_spans.append(span)
-            spans = root_spans
-
-        duration_ms = int((max_time - min_time).total_seconds() * 1000) if max_time else 0
-
-        has_errors = errors > 0
-        is_slow = slow_spans > 0
-        success = not (has_errors or is_slow)
-
-        return {
-            "request_id": request_id,
-            "spans": spans,
-            "total_spans": total_spans,
-            "returned_spans": len(results),
-            "pagination": {
-                "limit": limit,
-                "offset": offset,
-                "has_more": (offset + len(results)) < total_spans
-            },
-            "total_duration_ms": duration_ms,
-            "services_involved": sorted(list(services)),
-            "error_count": errors,
-            "slow_span_count": slow_spans,
-            "status": "SUCCESS" if success else ("FAILED" if has_errors else "SLOW")
-        }
-    finally:
-        return_connection(conn)
 
 
 def init_pool():
@@ -142,68 +56,7 @@ def insert_logs(logs: list) -> int:
 
     return inserted
 
-def batch_insert_logs(logs: list) -> int:
-    if not logs:
-        return 0
-
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    try:
-        values = []
-        for log in logs:
-            values.append((
-                log['timestamp'],
-                log['service_name'],
-                log['log_level'],
-                log['message'],
-                log.get('request_id'),
-                log.get('user_id'),
-                log.get('latency_ms'),
-                log.get('metadata'),
-                log.get('span_id'),
-                log.get('parent_span_id')
-            ))
-
-        cursor.executemany(
-                """INSERT INTO logs
-                (timestamp, service_name, log_level, message, request_id, user_id, latency_ms, metadata, span_id, parent_span_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                values
-            )
-        conn.commit()
-        inserted = len(logs)
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        return_connection(conn)
-
-    return inserted
-
-
-def search_logs(service: str, level: str = None, hours: int = 1, limit: int = 100) -> list:
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    try:
-        query = "SELECT id, timestamp, service_name, log_level, message, request_id, user_id, latency_ms, metadata FROM logs WHERE service_name = %s"
-        params = [service]
-
-        if level:
-            query += " AND log_level = %s"
-            params.append(level)
-
-        query += " AND timestamp > NOW() - INTERVAL '%s hours' ORDER BY timestamp DESC LIMIT %s"
-        params.extend([hours, limit])
-
-        cursor.execute(query, tuple(params))
-        results = cursor.fetchall()
-
-        return results
-    finally:
-        return_connection(conn)
-    
+  
 def create_alert_rule(service_name: str, metric_type: str, threshold: float, enabled: bool = True) -> dict:
     conn = get_connection()
     cursor = conn.cursor()
@@ -456,12 +309,12 @@ def create_alert_for_failed_trace(trace_id: str, service_name: str) -> dict:
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            INSERT INTO alerts 
+            INSERT INTO alerts
             (rule_id, service_name, trace_id, metric_type, threshold, actual_value, state, webhook_status)
             VALUES (%s, %s, %s, 'trace_failure', 1, 1, 'FIRING', 'PENDING')
             RETURNING alert_id
         """, (None, service_name, trace_id))
-        
+
         alert_id = cursor.fetchone()[0]
         conn.commit()
         return {
@@ -470,5 +323,115 @@ def create_alert_for_failed_trace(trace_id: str, service_name: str) -> dict:
             "service_name": service_name,
             "state": "FIRING"
         }
+    finally:
+        return_connection(conn)
+
+def init_archive_table():
+    """Create archive metadata table."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS archive_metadata (
+                archive_id SERIAL PRIMARY KEY,
+                log_count INT NOT NULL,
+                s3_path VARCHAR(255) NOT NULL,
+                tier VARCHAR(10) NOT NULL,
+                status VARCHAR(20) DEFAULT 'PENDING',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMP,
+                error_message TEXT,
+                retry_count INT DEFAULT 0
+            )
+        """)
+        conn.commit()
+        print("✓ Archive metadata table initialized")
+    except Exception as e:
+        print(f"Archive table may already exist: {e}")
+    finally:
+        return_connection(conn)
+
+def track_archive(log_count: int, s3_path: str, tier: str, status: str = "PENDING", error_msg: str = None) -> int:
+    """Track archive operation in metadata table."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO archive_metadata (log_count, s3_path, tier, status, error_message)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING archive_id
+        """, (log_count, s3_path, tier, status, error_msg))
+        archive_id = cursor.fetchone()[0]
+        conn.commit()
+        return archive_id
+    finally:
+        return_connection(conn)
+
+def update_archive_status(archive_id: int, status: str, error_msg: str = None):
+    """Update archive status after completion."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            UPDATE archive_metadata
+            SET status = %s, completed_at = CURRENT_TIMESTAMP, error_message = %s
+            WHERE archive_id = %s
+        """, (status, error_msg, archive_id))
+        conn.commit()
+    finally:
+        return_connection(conn)
+
+def get_archive_status(archive_id: int) -> dict:
+    """Get archive operation status."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT archive_id, log_count, s3_path, tier, status, created_at, completed_at, error_message, retry_count
+            FROM archive_metadata WHERE archive_id = %s
+        """, (archive_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "archive_id": row[0],
+            "log_count": row[1],
+            "s3_path": row[2],
+            "tier": row[3],
+            "status": row[4],
+            "created_at": row[5],
+            "completed_at": row[6],
+            "error_message": row[7],
+            "retry_count": row[8]
+        }
+    finally:
+        return_connection(conn)
+
+def get_failed_archives() -> list:
+    """Get failed archives for retry."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT archive_id, log_count, s3_path, tier, retry_count
+            FROM archive_metadata
+            WHERE status = 'FAILED' AND retry_count < 3
+            ORDER BY created_at ASC
+        """)
+        return cursor.fetchall()
+    finally:
+        return_connection(conn)
+
+def increment_archive_retry(archive_id: int):
+    """Increment retry count for a failed archive."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            UPDATE archive_metadata
+            SET retry_count = retry_count + 1
+            WHERE archive_id = %s
+        """, (archive_id,))
+        conn.commit()
     finally:
         return_connection(conn)
