@@ -316,3 +316,118 @@ def increment_archive_retry(archive_id: int):
         conn.commit()
     finally:
         return_connection(conn)
+
+def init_auth_tables():
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                       user_id SERIAL PRIMARY KEY,
+                       username VARCHAR(50) UNIQUE NOT NULL,
+                        email VARCHAR(100) UNIQUE NOT NULL,
+                        hashed_password VARCHAR(255) NOT NULL,
+                        role VARCHAR(20) DEFAULT 'viewer',
+                        is_active BOOLEAN DEFAULT true,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                       )
+                       """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS refresh_tokens (
+                token_id SERIAL PRIMARY KEY,
+                user_id INT REFERENCES users(user_id),
+                token TEXT NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                is_revoked BOOLEAN DEFAULT false,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Seed default admin if no users exist
+        cursor.execute("SELECT COUNT(*) FROM users")
+        if cursor.fetchone()[0] == 0:
+            from src.core.auth import hash_password
+            hashed = hash_password("admin123")
+            cursor.execute(
+                "INSERT INTO users (username, email, hashed_password, role) VALUES (%s, %s, %s, %s)",
+                ("admin", "admin@localhost", hashed, "admin")
+            )
+            print("✓ Default admin created (admin / admin123) — change this password")
+
+        conn.commit()
+        print("✓ Auth tables initialized")
+    except Exception as e:
+        conn.rollback()
+        print(f"Auth table init error: {e}")
+    finally:
+        return_connection(conn)
+
+def get_user_by_username(username: str) -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT user_id, username, email, hashed_password, role, is_active FROM users WHERE username = %s",
+            (username,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {"user_id": row[0], "username": row[1], "email": row[2],
+                "hashed_password": row[3], "role": row[4], "is_active": row[5]}
+    finally:
+        return_connection(conn)
+
+def get_user_by_id(user_id: int) -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT user_id, username, email, role, is_active FROM users WHERE user_id = %s",
+            (user_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {"user_id": row[0], "username": row[1], "email": row[2],
+                "role": row[3], "is_active": row[4]}
+    finally:
+        return_connection(conn)
+
+def store_refresh_token(user_id: int, token: str, expires_at) -> None:
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (%s, %s, %s)",
+            (user_id, token, expires_at)
+        )
+        conn.commit()
+    finally:
+        return_connection(conn)
+
+def verify_refresh_token(token: str) -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT token_id, user_id FROM refresh_tokens WHERE token = %s AND is_revoked = false AND expires_at > NOW()",
+            (token,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {"token_id": row[0], "user_id": row[1]}
+    finally:
+        return_connection(conn)
+
+def revoke_refresh_token(token: str) -> None:
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE refresh_tokens SET is_revoked = true WHERE token = %s",
+            (token,)
+        )
+        conn.commit()
+    finally:
+        return_connection(conn)
