@@ -28,7 +28,7 @@ def get_from_cache(key: str):
         return r.get(key)
     except:
         return None
-    
+
 def set_in_cache(key: str, value: str, ttl: int = 300):
     try:
         r = get_redis()

@@ -2,20 +2,17 @@ import os
 import psycopg2
 from psycopg2 import pool
 from dotenv import load_dotenv
-import json
 
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-TRACE_LATENCY_THRESHOLD = 500 # ms - considered slow
 
 connection_pool = None
 
 
-
 def init_pool():
     global connection_pool
-    connection_pool = psycopg2.pool.SimpleConnectionPool(1,20,DATABASE_URL)
+    connection_pool = psycopg2.pool.SimpleConnectionPool(1, 20, DATABASE_URL)
 
 def get_connection():
     if connection_pool is None:
@@ -43,8 +40,6 @@ def insert_logs(logs: list) -> int:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (log.timestamp, log.service_name, log.log_level, log.message, log.request_id, log.user_id, log.latency_ms, log.metadata, log.span_id, log.parent_span_id)
-
-
             )
             inserted += 1
         conn.commit()
@@ -56,7 +51,7 @@ def insert_logs(logs: list) -> int:
 
     return inserted
 
-  
+
 def create_alert_rule(service_name: str, metric_type: str, threshold: float, enabled: bool = True) -> dict:
     conn = get_connection()
     cursor = conn.cursor()
@@ -93,9 +88,7 @@ def get_alert_rules(enabled_only: bool = False) -> list:
     finally:
         return_connection(conn)
 
-
 def get_alert_rule(rule_id: int) -> dict:
-    """Get a specific alert rule."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -119,7 +112,6 @@ def get_alert_rule(rule_id: int) -> dict:
         return_connection(conn)
 
 def delete_alert_rule(rule_id: int) -> bool:
-    """Delete an alert rule."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -130,30 +122,28 @@ def delete_alert_rule(rule_id: int) -> bool:
         return_connection(conn)
 
 def get_alerts(state: str = None, service: str = None, limit: int = 100) -> list:
-    """Get alerts with optional filtering."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
         query = "SELECT alert_id, rule_id, service_name, trace_id, metric_type, threshold, actual_value, state, created_at, resolved_at, acknowledged_at, webhook_status FROM alerts WHERE 1=1"
         params = []
-        
+
         if state:
             query += " AND state = %s"
             params.append(state)
         if service:
             query += " AND service_name = %s"
             params.append(service)
-        
+
         query += " ORDER BY created_at DESC LIMIT %s"
         params.append(limit)
-        
+
         cursor.execute(query, params)
         return cursor.fetchall()
     finally:
         return_connection(conn)
 
 def acknowledge_alert(alert_id: int) -> bool:
-    """Mark an alert as acknowledged."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -167,7 +157,6 @@ def acknowledge_alert(alert_id: int) -> bool:
         return_connection(conn)
 
 def update_alert_rule(rule_id: int, threshold: float = None, enabled: bool = None) -> dict:
-    """Update an alert rule."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -179,13 +168,13 @@ def update_alert_rule(rule_id: int, threshold: float = None, enabled: bool = Non
         if enabled is not None:
             updates.append("enabled = %s")
             params.append(enabled)
-        
+
         if not updates:
             return get_alert_rule(rule_id)
-        
+
         updates.append("updated_at = CURRENT_TIMESTAMP")
         params.append(rule_id)
-        
+
         query = f"UPDATE alert_rules SET {', '.join(updates)} WHERE rule_id = %s RETURNING rule_id, service_name, metric_type, threshold, enabled, created_at, updated_at"
         cursor.execute(query, params)
         rule = cursor.fetchone()
@@ -202,109 +191,7 @@ def update_alert_rule(rule_id: int, threshold: float = None, enabled: bool = Non
     finally:
         return_connection(conn)
 
-def check_and_fire_alerts() -> list:
-    """Check metrics against rules and create/update alerts."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        # Get enabled rules
-        cursor.execute("""
-            SELECT rule_id, service_name, metric_type, threshold 
-            FROM alert_rules WHERE enabled = true
-        """)
-        rules = cursor.fetchall()
-        
-        alerts_fired = []
-        
-        for rule in rules:
-            rule_id, service_name, metric_type, threshold = rule
-            
-            # Get the latest 2 metric windows for this service
-            cursor.execute("""
-                SELECT timestamp, {} 
-                FROM metrics 
-                WHERE service_name = %s 
-                ORDER BY timestamp DESC 
-                LIMIT 2
-            """.format(metric_type), (service_name,))
-            
-            recent_metrics = cursor.fetchall()
-            
-            if not recent_metrics or len(recent_metrics) < 2:
-                continue
-            
-            # Check if both recent windows exceed threshold
-            breaches = sum(1 for _, value in recent_metrics if value is not None and value > threshold)
-            should_fire = breaches >= 2
-            
-            # Get current alert state for this rule+service
-            cursor.execute("""
-                SELECT alert_id, state FROM alerts 
-                WHERE rule_id = %s AND service_name = %s AND state = 'FIRING'
-                ORDER BY created_at DESC LIMIT 1
-            """, (rule_id, service_name))
-            
-            current_alert = cursor.fetchone()
-            current_state = current_alert[1] if current_alert else None
-            
-            # State transition logic
-            if should_fire and current_state != 'FIRING':
-                # Create new alert or update existing
-                actual_value = recent_metrics[0][1]
-                if current_alert:
-                    # Update existing alert to FIRING
-                    cursor.execute("""
-                        UPDATE alerts 
-                        SET state = 'FIRING', updated_at = CURRENT_TIMESTAMP
-                        WHERE alert_id = %s
-                    """, (current_alert[0],))
-                else:
-                    # Create new alert
-                    cursor.execute("""
-                        INSERT INTO alerts 
-                        (rule_id, service_name, trace_id, metric_type, threshold, actual_value, state, webhook_status)
-                        VALUES (%s, %s, %s, %s, %s, %s, 'FIRING', 'PENDING')
-                        RETURNING alert_id
-                    """, (rule_id, service_name, None, metric_type, threshold, actual_value))
-                    alert_id = cursor.fetchone()[0]
-                    alerts_fired.append({
-                        "alert_id": alert_id,
-                        "rule_id": rule_id,
-                        "service_name": service_name,
-                        "state": "FIRING",
-                        "actual_value": actual_value
-                    })
-            
-            elif not should_fire and current_state == 'FIRING':
-                # Check if 3 consecutive windows below threshold
-                cursor.execute("""
-                    SELECT COUNT(*) FROM metrics 
-                    WHERE service_name = %s 
-                    AND {} <= %s
-                    ORDER BY timestamp DESC LIMIT 3
-                """.format(metric_type), (service_name, threshold))
-                
-                windows_below = cursor.fetchone()[0]
-                
-                if windows_below >= 3:
-                    # Resolve alert
-                    cursor.execute("""
-                        UPDATE alerts 
-                        SET state = 'RESOLVED', resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-                        WHERE alert_id = %s
-                    """, (current_alert[0],))
-                    alerts_fired.append({
-                        "alert_id": current_alert[0],
-                        "state": "RESOLVED"
-                    })
-        
-        conn.commit()
-        return alerts_fired
-    finally:
-        return_connection(conn)
-
 def create_alert_for_failed_trace(trace_id: str, service_name: str) -> dict:
-    """Create an alert for a failed trace."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -327,7 +214,6 @@ def create_alert_for_failed_trace(trace_id: str, service_name: str) -> dict:
         return_connection(conn)
 
 def init_archive_table():
-    """Create archive metadata table."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -352,7 +238,6 @@ def init_archive_table():
         return_connection(conn)
 
 def track_archive(log_count: int, s3_path: str, tier: str, status: str = "PENDING", error_msg: str = None) -> int:
-    """Track archive operation in metadata table."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -368,7 +253,6 @@ def track_archive(log_count: int, s3_path: str, tier: str, status: str = "PENDIN
         return_connection(conn)
 
 def update_archive_status(archive_id: int, status: str, error_msg: str = None):
-    """Update archive status after completion."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -382,7 +266,6 @@ def update_archive_status(archive_id: int, status: str, error_msg: str = None):
         return_connection(conn)
 
 def get_archive_status(archive_id: int) -> dict:
-    """Get archive operation status."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -408,7 +291,6 @@ def get_archive_status(archive_id: int) -> dict:
         return_connection(conn)
 
 def get_failed_archives() -> list:
-    """Get failed archives for retry."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -423,7 +305,6 @@ def get_failed_archives() -> list:
         return_connection(conn)
 
 def increment_archive_retry(archive_id: int):
-    """Increment retry count for a failed archive."""
     conn = get_connection()
     cursor = conn.cursor()
     try:

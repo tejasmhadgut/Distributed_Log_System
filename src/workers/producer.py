@@ -9,7 +9,6 @@ load_dotenv()
 producer = None
 
 def init_producer():
-    """Initialize Kafka producer with retry logic."""
     global producer
     max_retries = 10
     for attempt in range(max_retries):
@@ -30,13 +29,11 @@ def init_producer():
                 raise Exception(f"Failed to connect to Kafka after {max_retries} attempts")
 
 def get_producer():
-    """Get or create producer."""
     if producer is None:
         init_producer()
     return producer
 
 def send_log(log: dict):
-    """Send a log to Kafka. Fire-and-forget."""
     try:
         p = get_producer()
         p.send('logs', value=log)
@@ -44,7 +41,6 @@ def send_log(log: dict):
         raise Exception(f"Failed to send log to Kafka: {e}")
 
 def close_producer():
-    """Close producer connection."""
     global producer
     if producer:
         producer.flush()

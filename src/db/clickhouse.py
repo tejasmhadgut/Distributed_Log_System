@@ -10,15 +10,11 @@ CLICKHOUSE_DB = os.getenv("CLICKHOUSE_DB", "logs_db")
 client = None
 
 def init_clickhouse():
-    """Initialize ClickHouse connection and create tables."""
     global client
-    # Use native protocol with no auth
     client = Client(CLICKHOUSE_HOST, port=CLICKHOUSE_NATIVE_PORT, database=CLICKHOUSE_DB, settings={'connect_timeout': 10})
 
-    # Create database if not exists
     client.execute(f"CREATE DATABASE IF NOT EXISTS {CLICKHOUSE_DB}")
-    
-    # Create logs table
+
     client.execute(f"""
         CREATE TABLE IF NOT EXISTS {CLICKHOUSE_DB}.logs (
             id UInt64,
@@ -38,18 +34,16 @@ def init_clickhouse():
         PARTITION BY toDate(timestamp)
         TTL timestamp + INTERVAL 90 DAY
     """)
-    
+
     print("✓ ClickHouse initialized")
 
 def get_client():
-    """Get ClickHouse client, initialize if needed."""
     global client
     if client is None:
         init_clickhouse()
     return client
 
 def batch_insert_logs_ch(logs: list) -> int:
-    """Insert logs batch into ClickHouse."""
     if not logs:
         return 0
 
@@ -57,13 +51,12 @@ def batch_insert_logs_ch(logs: list) -> int:
         ch = get_client()
         values = []
         for i, log in enumerate(logs):
-            # Parse timestamp if it's a string
             ts = log['timestamp']
             if isinstance(ts, str):
                 ts = datetime.fromisoformat(ts.replace('Z', '+00:00'))
 
             values.append((
-                i,  # id - ClickHouse requires explicit ID
+                i,
                 ts,
                 log['service_name'],
                 log['log_level'],
@@ -75,7 +68,7 @@ def batch_insert_logs_ch(logs: list) -> int:
                 log.get('span_id'),
                 log.get('parent_span_id')
             ))
-        
+
         ch.execute(
             f"INSERT INTO {CLICKHOUSE_DB}.logs "
             "(id, timestamp, service_name, log_level, message, request_id, user_id, "
@@ -88,7 +81,6 @@ def batch_insert_logs_ch(logs: list) -> int:
         raise
 
 def search_logs_ch(service: str, level: str = None, hours: int = 1, limit: int = 100) -> list:
-    """Search logs in ClickHouse."""
     try:
         ch = get_client()
         query = f"SELECT * FROM {CLICKHOUSE_DB}.logs WHERE service_name = %(service)s"
@@ -106,11 +98,9 @@ def search_logs_ch(service: str, level: str = None, hours: int = 1, limit: int =
         raise
 
 def get_trace_ch(request_id: str, limit: int = 100, offset: int = 0) -> dict:
-    """Get trace from ClickHouse."""
     try:
         ch = get_client()
 
-        # Get logs for this request
         query = f"""
             SELECT id, timestamp, service_name, log_level, message, latency_ms, span_id, parent_span_id
             FROM {CLICKHOUSE_DB}.logs
@@ -124,18 +114,16 @@ def get_trace_ch(request_id: str, limit: int = 100, offset: int = 0) -> dict:
         if not results:
             return None
 
-        # Get total count
         count_query = f"SELECT COUNT(*) FROM {CLICKHOUSE_DB}.logs WHERE request_id = %(request_id)s"
         total_spans = ch.execute(count_query, {"request_id": request_id})[0][0]
-        
-        # Format spans with hierarchy
+
         spans = []
         services = set()
         errors = 0
         slow_spans = 0
         min_time = None
         max_time = None
-        
+
         for row in results:
             span = {
                 "id": row[0],
@@ -150,17 +138,16 @@ def get_trace_ch(request_id: str, limit: int = 100, offset: int = 0) -> dict:
             }
             spans.append(span)
             services.add(row[2])
-            
+
             if row[3] == "ERROR":
                 errors += 1
-            if row[5] and row[5] > 500:  # TRACE_LATENCY_THRESHOLD
+            if row[5] and row[5] > 500:
                 slow_spans += 1
             if min_time is None or row[1] < min_time:
                 min_time = row[1]
             if max_time is None or row[1] > max_time:
                 max_time = row[1]
-        
-        # Build hierarchy
+
         if spans and spans[0].get('span_id'):
             span_map = {s['span_id']: s for s in spans}
             root_spans = []
@@ -170,13 +157,12 @@ def get_trace_ch(request_id: str, limit: int = 100, offset: int = 0) -> dict:
                 else:
                     root_spans.append(span)
             spans = root_spans
-        
+
         duration_ms = int((max_time - min_time).total_seconds() * 1000) if max_time else 0
-        
         has_errors = errors > 0
         is_slow = slow_spans > 0
         success = not (has_errors or is_slow)
-        
+
         return {
             "request_id": request_id,
             "spans": spans,
@@ -198,7 +184,6 @@ def get_trace_ch(request_id: str, limit: int = 100, offset: int = 0) -> dict:
         raise
 
 def get_logs_for_metrics(service_name: str, window_start: datetime, window_end: datetime) -> list:
-    """Get logs in time window for metric computation."""
     try:
         ch = get_client()
         query = f"""
@@ -216,9 +201,8 @@ def get_logs_for_metrics(service_name: str, window_start: datetime, window_end: 
         raise
 
 def init_clickhouse_metrics_table():
-    """Create metrics table in ClickHouse."""
     ch = get_client()
-    
+
     ch.execute(f"""
         CREATE TABLE IF NOT EXISTS {CLICKHOUSE_DB}.metrics (
             id UInt64,
@@ -235,12 +219,11 @@ def init_clickhouse_metrics_table():
         TTL timestamp + INTERVAL 365 DAY
     """)
 
-def insert_metrics_ch(service_name: str, request_count: int, error_count: int, 
+def insert_metrics_ch(service_name: str, request_count: int, error_count: int,
                       error_rate: float, latency_p95: int, window_start) -> bool:
-    """Insert metric into ClickHouse."""
     try:
         ch = get_client()
-        
+
         ch.execute(
             f"INSERT INTO {CLICKHOUSE_DB}.metrics "
             "(id, timestamp, service_name, request_count, error_count, error_rate, latency_p95) VALUES",
@@ -260,11 +243,9 @@ def insert_metrics_ch(service_name: str, request_count: int, error_count: int,
         raise
 
 def get_metrics_for_alert(service_name: str, metric_type: str, lookback_windows: int = 2) -> list:
-    """Get recent metrics for alert checking."""
     try:
         ch = get_client()
 
-        # Get last N windows for this service
         query = f"""
             SELECT timestamp, {metric_type}
             FROM {CLICKHOUSE_DB}.metrics
@@ -279,7 +260,6 @@ def get_metrics_for_alert(service_name: str, metric_type: str, lookback_windows:
         raise
 
 def get_logs_for_archival(older_than_days: int = 7, limit: int = 10000) -> list:
-    """Get logs older than N days for archival."""
     try:
         ch = get_client()
         query = f"""
@@ -296,7 +276,6 @@ def get_logs_for_archival(older_than_days: int = 7, limit: int = 10000) -> list:
         raise
 
 def delete_archived_logs(log_ids: list) -> int:
-    """Delete logs from ClickHouse after confirming S3 upload."""
     if not log_ids:
         return 0
     try:

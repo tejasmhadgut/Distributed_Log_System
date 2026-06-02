@@ -1,12 +1,9 @@
 import json
 import time
 from kafka import KafkaConsumer
-from src.clickhouse_db import batch_insert_logs_ch
+from src.db.clickhouse import batch_insert_logs_ch
 
 def start_consumer():
-    """Start Kafka consumer with batching logic (Option C)."""
-
-    # Retry connecting to Kafka
     max_retries = 10
     consumer = None
     for attempt in range(max_retries):
@@ -37,24 +34,24 @@ def start_consumer():
     try:
         while True:
             msg = consumer.poll(timeout_ms=500)
-            
+
             if msg:
                 for topic_partition, messages in msg.items():
                     for message in messages:
                         batch.append(message.value)
-            
+
             time_elapsed = time.time() - last_insert_time
             should_insert = len(batch) >= 100 or (time_elapsed >= 5 and batch)
-            
+
             if should_insert:
                 try:
-                    inserted = batch_insert_logs_ch(batch)  # Changed function name
+                    inserted = batch_insert_logs_ch(batch)
                     print(f"✓ Inserted {inserted} logs (time: {time_elapsed:.1f}s, count: {len(batch)})")
                     batch = []
                     last_insert_time = time.time()
                 except Exception as e:
                     print(f"✗ Error inserting batch: {e}")
-                    
+
     except KeyboardInterrupt:
         print("\n✓ Consumer shutting down")
     finally:

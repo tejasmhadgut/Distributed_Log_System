@@ -1,12 +1,13 @@
+import time
 from datetime import datetime
 import requests
+from src.db.postgres import get_connection, return_connection
 
 
-def send_webhook(alert_id: int, alert_data: dict, webhook_url: str = "http://api:8000/webhook/alerts"
-) -> bool:
+def send_webhook(alert_id: int, alert_data: dict, webhook_url: str = "http://api:8000/webhook/alerts") -> bool:
     max_retries = 3
     retry_delay = 1
-    
+
     for attempt in range(max_retries):
         try:
             response = requests.post(
@@ -23,7 +24,6 @@ def send_webhook(alert_id: int, alert_data: dict, webhook_url: str = "http://api
                 timeout=5
             )
             if response.status_code == 200:
-                # Update webhook_status to SENT
                 conn = get_connection()
                 cursor = conn.cursor()
                 try:
@@ -40,5 +40,5 @@ def send_webhook(alert_id: int, alert_data: dict, webhook_url: str = "http://api
                 time.sleep(retry_delay)
             else:
                 print(f"Webhook failed for alert {alert_id}: {e}")
-        
+
     return False

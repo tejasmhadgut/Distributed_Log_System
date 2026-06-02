@@ -14,13 +14,14 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-  
+
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: log_analytics_zookeeper
@@ -44,12 +45,28 @@ services:
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
     ports:
       - "9092:9092"
-    
-  
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: log_analytics_clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: logs_db
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   api:
     build:
       context: .
-      dockerfile:  Dockerfile
+      dockerfile: Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,19 +77,17 @@ services:
       kafka:
         condition: service_started
     environment:
-      environment:
       DATABASE_URL: postgresql://logs_user:logs_password@postgres:5432/logs_db
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 9000
       CLICKHOUSE_DB: logs_db
       REDIS_URL: redis://redis:6379/0
-
     ports:
       - "8000:8000"
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000
     volumes:
       - .:/app
-    
+
   consumer:
     build:
       context: .
@@ -90,7 +105,7 @@ services:
       CLICKHOUSE_PORT: 9000
       CLICKHOUSE_DB: logs_db
       REDIS_URL: redis://redis:6379/0
-    command: python -m src.consumer
+    command: python -m src.workers.consumer
     volumes:
       - .:/app
 
@@ -111,7 +126,7 @@ services:
       CLICKHOUSE_PORT: 9000
       CLICKHOUSE_DB: logs_db
       REDIS_URL: redis://redis:6379/0
-    command: python -m src.stream_processor
+    command: python -m src.workers.stream_processor
     volumes:
       - .:/app
 
@@ -129,26 +144,10 @@ services:
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: 9000
       CLICKHOUSE_DB: logs_db
-    command: python -m src.alert_processor
+    command: python -m src.workers.alert_processor
     volumes:
       - .:/app
 
-  clickhouse:
-    image: clickhouse/clickhouse-server:latest
-    container_name: log_analytics_clickhouse
-    ports:
-      - "8123:8123"
-      - "9000:9000"
-    environment:
-      CLICKHOUSE_DB: logs_db
-      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
-    volumes:
-      - clickhouse_data:/var/lib/clickhouse
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
   archiver:
     build:
       context: .
@@ -168,11 +167,10 @@ services:
       AWS_REGION: us-east-1
       S3_BUCKET: log-analytics-archive
       ARCHIVE_INTERVAL_SECONDS: 300
-    command: python -m src.archiver
+    command: python -m src.workers.archiver
     volumes:
       - .:/app
-   
-  
+
 volumes:
   postgres_data:
   redis_data:

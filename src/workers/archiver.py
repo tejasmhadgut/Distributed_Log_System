@@ -3,8 +3,8 @@ import json
 import boto3
 import os
 from datetime import datetime
-from src.clickhouse_db import get_logs_for_archival, delete_archived_logs
-from src.database import track_archive, update_archive_status, get_failed_archives, increment_archive_retry
+from src.db.clickhouse import get_logs_for_archival, delete_archived_logs
+from src.db.postgres import track_archive, update_archive_status, get_failed_archives, increment_archive_retry
 
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
@@ -15,7 +15,6 @@ ARCHIVE_INTERVAL = int(os.getenv("ARCHIVE_INTERVAL_SECONDS", 300))
 s3_client = None
 
 def init_s3():
-    """Initialize S3 client."""
     global s3_client
     if AWS_ACCESS_KEY and AWS_SECRET_KEY:
         s3_client = boto3.client(
@@ -33,14 +32,12 @@ def init_s3():
         print("⚠ AWS credentials not provided, S3 archival will be skipped")
 
 def get_s3_client():
-    """Get or initialize S3 client."""
     global s3_client
     if s3_client is None:
         init_s3()
     return s3_client
 
 def determine_tier(days_old: int) -> str:
-    """Determine archive tier based on age."""
     if days_old < 90:
         return "warm"
     elif days_old < 365:
@@ -49,7 +46,6 @@ def determine_tier(days_old: int) -> str:
         return "archive"
 
 def archive_logs_batch(logs: list) -> tuple[bool, str]:
-    """Archive logs to S3 in JSONL format."""
     if not logs or not get_s3_client():
         return False, "No logs or S3 not configured"
 
@@ -100,7 +96,6 @@ def archive_logs_batch(logs: list) -> tuple[bool, str]:
         return False, str(e)
 
 def process_archive_cycle():
-    """Single archive cycle."""
     try:
         logs = get_logs_for_archival(older_than_days=7, limit=10000)
 
@@ -126,7 +121,6 @@ def process_archive_cycle():
         print(f"✗ Archive cycle failed: {e}")
 
 def retry_failed_archives():
-    """Retry failed archives."""
     try:
         failed = get_failed_archives()
         if not failed:
@@ -148,7 +142,6 @@ def retry_failed_archives():
         print(f"✗ Retry cycle failed: {e}")
 
 def start_archiver():
-    """Start archiver service loop."""
     init_s3()
     print(f"✓ Archiver started, running every {ARCHIVE_INTERVAL}s")
 
