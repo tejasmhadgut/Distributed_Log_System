@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from src.models.alert import AlertResponse
 from src.db.postgres import get_alerts, acknowledge_alert
+from src.api.dependencies import require_permission
 
 router = APIRouter(tags=["alerts"])
 
 
-@router.get("/alerts")
+@router.get("/alerts", dependencies=[Depends(require_permission("alerts:read"))])
 async def list_alerts(state: str = None, service: str = None, limit: int = 100):
     try:
         alerts = get_alerts(state, service, limit)
@@ -32,7 +33,7 @@ async def list_alerts(state: str = None, service: str = None, limit: int = 100):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/alerts/{alert_id}/acknowledge")
+@router.put("/alerts/{alert_id}/acknowledge", dependencies=[Depends(require_permission("alerts:acknowledge"))])
 async def ack_alert(alert_id: int):
     try:
         if not acknowledge_alert(alert_id):

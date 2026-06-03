@@ -1,14 +1,15 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from src.models.alert import AlertRuleCreate, AlertRuleUpdate, AlertRuleResponse
 from src.db.postgres import (
     create_alert_rule, get_alert_rules, get_alert_rule,
     update_alert_rule, delete_alert_rule
 )
+from src.api.dependencies import require_permission
 
 router = APIRouter(prefix="/alert_rules", tags=["alert_rules"])
 
 
-@router.post("", response_model=AlertRuleResponse)
+@router.post("", response_model=AlertRuleResponse, dependencies=[Depends(require_permission("rules:create"))])
 async def create_rule(rule: AlertRuleCreate):
     try:
         return create_alert_rule(
@@ -21,7 +22,7 @@ async def create_rule(rule: AlertRuleCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_permission("rules:read"))])
 async def list_rules(enabled_only: bool = False):
     try:
         rules = get_alert_rules(enabled_only)
@@ -43,7 +44,7 @@ async def list_rules(enabled_only: bool = False):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{rule_id}", response_model=AlertRuleResponse)
+@router.get("/{rule_id}", response_model=AlertRuleResponse, dependencies=[Depends(require_permission("rules:read"))])
 async def get_rule(rule_id: int):
     try:
         rule = get_alert_rule(rule_id)
@@ -56,7 +57,7 @@ async def get_rule(rule_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/{rule_id}", response_model=AlertRuleResponse)
+@router.put("/{rule_id}", response_model=AlertRuleResponse, dependencies=[Depends(require_permission("rules:update"))])
 async def update_rule(rule_id: int, updates: AlertRuleUpdate):
     try:
         rule = update_alert_rule(
@@ -73,7 +74,7 @@ async def update_rule(rule_id: int, updates: AlertRuleUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/{rule_id}")
+@router.delete("/{rule_id}", dependencies=[Depends(require_permission("rules:delete"))])
 async def delete_rule(rule_id: int):
     try:
         if not delete_alert_rule(rule_id):

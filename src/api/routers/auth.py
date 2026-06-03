@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from src.models.auth import LoginRequest, RefreshRequest, TokenResponse
 from src.services import auth_service
 

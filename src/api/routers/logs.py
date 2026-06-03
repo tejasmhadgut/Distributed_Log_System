@@ -1,9 +1,10 @@
 import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from src.models.log import Log
 from src.workers.producer import send_log
 from src.db.clickhouse import search_logs_ch
 from src.services.cache_service import get_from_cache, set_in_cache
+from src.api.dependencies import require_permission
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 

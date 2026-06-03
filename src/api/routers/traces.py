@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from src.db.clickhouse import get_trace_ch
 from src.services.cache_service import get_cached_trace, cache_trace
+from src.api.dependencies import require_permission
 
 router = APIRouter(prefix="/traces", tags=["traces"])
 
@@ -40,7 +41,7 @@ async def get_trace_by_request_id(request_id: str, limit: int = 100, offset: int
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{request_id}/summary")
+@router.get("/{request_id}/summary", dependencies=[Depends(require_permission("traces:read"))])
 async def get_trace_summary(request_id: str):
     try:
         cached = get_cached_trace(f"trace-summary:{request_id}")
