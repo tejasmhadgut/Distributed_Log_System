@@ -15,6 +15,7 @@ class Permission(str, Enum):
     RULES_CREATE = "rules:create"
     RULES_UPDATE = "rules:update"
     RULES_DELETE = "rules:delete"
+    USERS_MANAGE = "users:manage"
 
 ROLE_PERMISSIONS: dict[str, list[str]] = {
     Role.ADMIN: [p.value for p in Permission],

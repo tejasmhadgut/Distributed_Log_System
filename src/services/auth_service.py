@@ -4,10 +4,20 @@ from src.core.auth import verify_password, create_access_token, create_refresh_t
 from src.core.exceptions import AuthenticationError
 from src.db.postgres import (
     get_user_by_username, get_user_by_id,
-    store_refresh_token, verify_refresh_token, revoke_refresh_token
+    store_refresh_token, verify_refresh_token, revoke_refresh_token,
+    create_user
 )
 from src.models.auth import TokenResponse
 
+def register(username: str, email: str, password: str) -> dict:
+    existing = get_user_by_username(username)
+    if existing:
+        from src.core.exceptions import ValidationError
+        raise ValidationError("Username already taken")
+
+    from src.core.auth import hash_password
+    hashed = hash_password(password)
+    return create_user(username, email, hashed, role="viewer")
 
 def login(username: str, password: str) -> TokenResponse:
     user = get_user_by_username(username)

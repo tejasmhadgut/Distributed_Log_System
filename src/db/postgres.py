@@ -431,3 +431,95 @@ def revoke_refresh_token(token: str) -> None:
         conn.commit()
     finally:
         return_connection(conn)
+
+def create_user(username: str, email: str, hashed_password: str, role: str = "viewer") -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO users (username, email, hashed_password, role)
+            VALUES (%s, %s, %s, %s)
+            RETURNING user_id, username, email, role, is_active, created_at
+            """,
+            (username, email, hashed_password, role)
+        )
+        row = cursor.fetchone()
+        conn.commit()
+        return {
+            "user_id": row[0], "username": row[1], "email": row[2],
+            "role": row[3], "is_active": row[4], "created_at": row[5]
+        }
+    finally:
+        return_connection(conn)
+
+
+def get_all_users() -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT user_id, username, email, role, is_active, created_at FROM users ORDER BY created_at ASC"
+        )
+        return cursor.fetchall()
+    finally:
+        return_connection(conn)
+
+
+def update_user_role(user_id: int, role: str) -> dict:
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE users SET role = %s
+            WHERE user_id = %s
+            RETURNING user_id, username, email, role, is_active, created_at
+            """,
+            (role, user_id)
+        )
+        row = cursor.fetchone()
+        conn.commit()
+        if not row:
+            return None
+        return {
+            "user_id": row[0], "username": row[1], "email": row[2],
+            "role": row[3], "is_active": row[4], "created_at": row[5]
+        }
+    finally:
+        return_connection(conn)
+
+
+def deactivate_user(user_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE users SET is_active = false WHERE user_id = %s",
+            (user_id,)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        return_connection(conn)
+
+def get_warm_archives(start_date: str, end_date: str) -> list:
+    
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        start_path = "warm/" + start_date.replace("-", "/")
+        end_path = "warm/" + end_date.replace("-", "/") + "~"
+        cursor.execute(
+            """
+            SELECT s3_path FROM archive_metadata
+            WHERE tier = 'warm'
+            AND status = 'SUCCESS'
+            AND s3_path >= %s AND s3_path <= %s
+            ORDER BY s3_path ASC
+            """,
+            (start_path, end_path)
+        )
+        return [row[0] for row in cursor.fetchall()]
+    finally:
+        return_connection(conn)

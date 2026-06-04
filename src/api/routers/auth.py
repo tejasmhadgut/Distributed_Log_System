@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from src.models.auth import LoginRequest, RefreshRequest, TokenResponse
+from src.models.auth import LoginRequest, RefreshRequest, TokenResponse, RegisterRequest, UserResponse
 from src.services import auth_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -12,8 +12,11 @@ async def login(request: LoginRequest):
 async def refresh(request: RefreshRequest):
     return auth_service.refresh(request.refresh_token)
 
-
 @router.post("/logout")
 async def logout(request: RefreshRequest):
     auth_service.logout(request.refresh_token)
     return {"logged_out": True}
+
+@router.post("/register", response_model=UserResponse)
+async def register(request: RegisterRequest):
+    return auth_service.register(request.username, request.email, request.password)

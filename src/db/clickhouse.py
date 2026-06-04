@@ -287,3 +287,36 @@ def delete_archived_logs(log_ids: list) -> int:
     except Exception as e:
         print(f"Error deleting archived logs: {e}")
         raise
+
+def get_latest_metrics_ch() -> list:
+    try:
+        ch = get_client()
+        return ch.execute(f"""
+            SELECT service_name, timestamp, request_count, error_count, error_rate, latency_p95
+            FROM {CLICKHOUSE_DB}.metrics
+            WHERE timestamp >= now() - INTERVAL 10 MINUTE
+            ORDER BY timestamp DESC
+            LIMIT 1 BY service_name
+        """)
+    except Exception as e:
+        print(f"Error getting latest metrics: {e}")
+        return []
+
+def get_recent_errors_ch(service_name: str, limit: int = 5) -> list:
+    try:
+        ch = get_client()
+        return ch.execute(
+            f"""
+            SELECT message, timestamp
+            FROM {CLICKHOUSE_DB}.logs
+            WHERE service_name = %(service)s
+              AND log_level = 'ERROR'
+              AND timestamp >= now() - INTERVAL 1 HOUR
+            ORDER BY timestamp DESC
+            LIMIT {limit}
+            """,
+            {"service": service_name}
+        )
+    except Exception as e:
+        print(f"Error getting recent errors: {e}")
+        return []
