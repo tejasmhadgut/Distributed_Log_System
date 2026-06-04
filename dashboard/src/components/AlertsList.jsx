@@ -1,30 +1,51 @@
 import { useState } from 'react'
+import { apiFetch } from '../api'
 
-function AlertRow({ alert }) {
+function AlertRow({ alert, token, onResolve }) {
   const [expanded, setExpanded] = useState(false)
+  const [resolving, setResolving] = useState(false)
   const hasErrors = alert.recent_errors?.length > 0
+
+  async function handleResolve() {
+    setResolving(true)
+    try {
+      await apiFetch(`/alerts/${alert.alert_id}/resolve`, token, { method: 'PUT' })
+      onResolve()
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setResolving(false)
+    }
+  }
 
   return (
     <div style={{ background: '#313244', borderRadius: '4px', overflow: 'hidden' }}>
-      <div
-        onClick={() => hasErrors && setExpanded(e => !e)}
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr auto auto',
-          padding: '8px 12px',
-          fontSize: '13px',
-          alignItems: 'center',
-          cursor: hasErrors ? 'pointer' : 'default',
-          gap: '8px',
-        }}
-      >
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr auto auto auto',
+        padding: '8px 12px',
+        fontSize: '13px',
+        alignItems: 'center',
+        gap: '8px',
+      }}>
         <span style={{ color: '#cdd6f4' }}>{alert.service_name}</span>
         <span style={{ color: '#6c7086' }}>{alert.metric_type}</span>
         <span style={{ color: '#f38ba8', fontWeight: 'bold' }}>
           {alert.actual_value}{alert.metric_type.includes('rate') ? '%' : ''}
         </span>
+        <button
+          className="secondary"
+          onClick={handleResolve}
+          disabled={resolving}
+          style={{ whiteSpace: 'nowrap' }}
+        >
+          {resolving ? '...' : 'Resolve'}
+        </button>
         {hasErrors && (
-          <span style={{ color: '#6c7086', fontSize: '11px' }}>
+          <span
+            onClick={() => setExpanded(e => !e)}
+            style={{ color: '#6c7086', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+          >
             {expanded ? '▲ hide' : '▼ errors'}
           </span>
         )}
@@ -57,7 +78,7 @@ function AlertRow({ alert }) {
   )
 }
 
-export default function AlertsList({ alerts }) {
+export default function AlertsList({ alerts, token, onResolve }) {
   const firing = alerts?.filter(a => a.state === 'FIRING') ?? []
 
   if (firing.length === 0) {
@@ -77,7 +98,9 @@ export default function AlertsList({ alerts }) {
         Active Alerts ({firing.length})
       </h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        {firing.map(alert => <AlertRow key={alert.alert_id} alert={alert} />)}
+        {firing.map(alert => (
+          <AlertRow key={alert.alert_id} alert={alert} token={token} onResolve={onResolve} />
+        ))}
       </div>
     </div>
   )

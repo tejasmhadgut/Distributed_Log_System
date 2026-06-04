@@ -22,12 +22,14 @@ export default function App() {
     token ? 'ws://localhost:8000/ws/metrics' : null
   )
 
-  function handleLogin(t, u) {
+  function handleLogin(t, u, r) {
     localStorage.setItem('token', t)
+    localStorage.setItem('refreshToken', r)
     localStorage.setItem('username', u)
     setToken(t)
     setUsername(u)
   }
+
 
   function goToTrace(requestId) {
     setTraceId(requestId)
@@ -80,7 +82,7 @@ export default function App() {
       <main>
         {activeTab === 'Dashboard' && (
           <div className="main">
-            <AlertsList alerts={data?.alerts} />
+            <AlertsList alerts={data?.alerts} token={token} onResolve={() => {}} />
             <div className="services-grid">
               {data?.metrics?.length > 0 ? (
                 data.metrics.map(service => (

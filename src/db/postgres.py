@@ -523,3 +523,16 @@ def get_warm_archives(start_date: str, end_date: str) -> list:
         return [row[0] for row in cursor.fetchall()]
     finally:
         return_connection(conn)
+
+def resolve_alert(alert_id: int) -> bool:
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            UPDATE alerts SET state = 'RESOLVED', resolved_at = CURRENT_TIMESTAMP
+            WHERE alert_id = %s AND state = 'FIRING'
+        """, (alert_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        return_connection(conn)

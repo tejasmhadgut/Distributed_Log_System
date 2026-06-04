@@ -18,7 +18,8 @@ export default function Login({ onLogin }) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || 'Login failed')
-      onLogin(data.access_token, username)
+      onLogin(data.access_token, username, data.refresh_token)
+
     } catch (err) {
       setError(err.message)
     } finally {

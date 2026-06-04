@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from src.models.alert import AlertResponse
-from src.db.postgres import get_alerts, acknowledge_alert
+from src.db.postgres import get_alerts, acknowledge_alert, resolve_alert
 from src.api.dependencies import require_permission
 
 router = APIRouter(tags=["alerts"])
@@ -51,5 +51,16 @@ async def receive_alert(alert: dict):
     try:
         print(f"Webhook received: {alert}")
         return {"received": True, "alert_id": alert.get("alert_id")}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/alerts/{alert_id}/resolve", dependencies=[Depends(require_permission("alerts:acknowledge"))])
+async def resolve(alert_id: int):
+    try:
+        if not resolve_alert(alert_id):
+            raise HTTPException(status_code=404, detail="Alert not found or already resolved")
+        return {"resolved": True}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
