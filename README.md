@@ -10,10 +10,11 @@ A production-grade log analytics platform built from scratch. Ingests logs via K
 
 | Metric | Result |
 |--------|--------|
-| Ingestion throughput | ~4,000 logs/sec (Kafka batching, batch size 500) |
-| Hot-tier query latency (uncached) | ~56ms avg (ClickHouse columnar scan) |
-| Hot-tier query latency (cached) | ~22ms avg (Redis cache hit) |
-| Cache speedup | ~2.5x |
+| Ingestion throughput | ~5,200 logs/sec (Kafka batching, batch size 1000, 50k logs) |
+| Hot-tier query latency (uncached) | ~51ms avg (ClickHouse columnar scan) |
+| Hot-tier query latency (cached) | ~34ms avg (Redis cache hit) |
+| Trace lookup latency | ~18ms avg |
+| Cache speedup | ~1.5x |
 | Stream processing window | 1 minute (30s grace period for late logs) |
 | Alert detection latency | ~2 minutes (2-window confirmation) |
 

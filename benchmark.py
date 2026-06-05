@@ -38,9 +38,11 @@ def get_token(host, username="admin", password="admin123"):
 def generate_logs(count):
     request_id = str(uuid.uuid4())
     logs = []
+    now = time.time()
     for i in range(count):
+        ts = now - random.randint(0, 3600)
         logs.append({
-            "timestamp": f"2024-01-15T10:{random.randint(0,59):02d}:{random.randint(0,59):02d}Z",
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts)),
             "service_name": random.choice(SERVICES),
             "log_level": random.choice(LEVELS),
             "message": random.choice(MESSAGES),
@@ -160,8 +162,8 @@ if __name__ == "__main__":
 
     request_id = benchmark_ingest(args.host, token, args.logs, args.batch)
 
-    print("\nWaiting 3s for Kafka consumer to process logs...")
-    time.sleep(3)
+    print("\nWaiting 10s for Kafka consumer to process logs...")
+    time.sleep(10)
 
     benchmark_query(args.host, token)
     benchmark_trace(args.host, token, request_id)
