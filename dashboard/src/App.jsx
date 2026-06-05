@@ -19,7 +19,7 @@ export default function App() {
   const [traceId, setTraceId] = useState('')
 
   const { data, status } = useWebSocket(
-    token ? 'ws://localhost:8000/ws/metrics' : null
+    token ? 'ws://18.191.36.209:8000/ws/metrics' : null
   )
 
   function handleLogin(t, u, r) {

@@ -8,6 +8,7 @@ export function useWebSocket(url) {
   const retryDelay = useRef(1000)
 
   const connect = useCallback(() => {
+    if (!url) return
     if (wsRef.current?.readyState === WebSocket.OPEN) return
 
     setStatus('connecting')

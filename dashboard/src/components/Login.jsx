@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { apiFetch } from '../api'
 
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState('')
@@ -11,13 +12,10 @@ export default function Login({ onLogin }) {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch('http://localhost:8000/auth/login', {
+      const data = await apiFetch('/auth/login', null, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.message || 'Login failed')
       onLogin(data.access_token, username, data.refresh_token)
 
     } catch (err) {

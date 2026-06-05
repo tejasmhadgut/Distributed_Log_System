@@ -2,6 +2,21 @@
 
 A production-grade log analytics platform built from scratch. Ingests logs via Kafka, stores them in a three-tier architecture (ClickHouse → S3 → Glacier), computes real-time metrics, fires alerts, and provides a React dashboard for live observability.
 
+**Live demo:** `http://18.191.36.209` — login with `admin` / `admin123` *(hosted on AWS EC2 free tier — may be stopped to avoid costs; run locally with docker-compose in under 2 minutes)*
+
+---
+
+## Performance
+
+| Metric | Result |
+|--------|--------|
+| Ingestion throughput | ~4,000 logs/sec (Kafka batching, batch size 500) |
+| Hot-tier query latency (uncached) | ~56ms avg (ClickHouse columnar scan) |
+| Hot-tier query latency (cached) | ~22ms avg (Redis cache hit) |
+| Cache speedup | ~2.5x |
+| Stream processing window | 1 minute (30s grace period for late logs) |
+| Alert detection latency | ~2 minutes (2-window confirmation) |
+
 ---
 
 ## Features

@@ -237,6 +237,42 @@ def init_archive_table():
     finally:
         return_connection(conn)
 
+def init_alert_tables():
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS alert_rules (
+                rule_id SERIAL PRIMARY KEY,
+                service_name VARCHAR(100) NOT NULL,
+                metric_type VARCHAR(50) NOT NULL,
+                threshold FLOAT NOT NULL,
+                enabled BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS alerts (
+                alert_id SERIAL PRIMARY KEY,
+                rule_id INT REFERENCES alert_rules(rule_id),
+                service_name VARCHAR(100) NOT NULL,
+                metric_type VARCHAR(50) NOT NULL,
+                metric_value FLOAT NOT NULL,
+                threshold FLOAT NOT NULL,
+                state VARCHAR(20) DEFAULT 'FIRING',
+                message TEXT,
+                fired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                resolved_at TIMESTAMP
+            )
+        """)
+        conn.commit()
+        print("✓ Alert tables initialized")
+    except Exception as e:
+        print(f"Alert tables may already exist: {e}")
+    finally:
+        return_connection(conn)
+
 def track_archive(log_count: int, s3_path: str, tier: str, status: str = "PENDING", error_msg: str = None) -> int:
     conn = get_connection()
     cursor = conn.cursor()

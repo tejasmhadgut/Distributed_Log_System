@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 from src.core.exceptions import APIError
 from src.core.middleware import api_error_handler
-from src.db.postgres import init_pool, close_pool, init_archive_table, init_auth_tables
+from src.db.postgres import init_pool, close_pool, init_archive_table, init_auth_tables, init_alert_tables
 from src.services.cache_service import init_redis, close_redis
 from src.workers.producer import close_producer
 from src.api.routers import logs, traces, alerts, rules, auth, users
@@ -21,6 +21,7 @@ async def lifespan(app: FastAPI):
     init_redis()
     init_archive_table()
     init_auth_tables()
+    init_alert_tables()
     print("✓ Database and Redis initialized")
     task = asyncio.create_task(metrics_broadcaster())
     yield
@@ -35,7 +36,7 @@ app = FastAPI(title="Log Analytics Platform", version="0.1.0", lifespan=lifespan
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "http://18.191.36.209"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

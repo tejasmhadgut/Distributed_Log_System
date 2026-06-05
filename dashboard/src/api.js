@@ -1,4 +1,5 @@
-const BASE = 'http://localhost:8000'
+const BASE = 'http://18.191.36.209:8000'
+
 
 async function refreshAccessToken() {
   const refreshToken = localStorage.getItem('refreshToken')
