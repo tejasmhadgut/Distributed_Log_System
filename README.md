@@ -33,7 +33,6 @@ Measured on a local machine using `benchmark.py` against a running docker-compos
 - Hot-tier search latency: **~51ms** uncached (ClickHouse columnar scan), **~34ms** cached (Redis)
 - Trace lookup: **~18ms** average
 
-See [DETAILS.md](DETAILS.md) for full benchmark methodology and numbers.
 
 ---
 
@@ -116,9 +115,30 @@ terraform/        # AWS EC2, S3, IAM provisioning
 
 ---
 
-## Design Decisions
 
-See [DESIGN_DECISIONS.md](DESIGN_DECISIONS.md) for the reasoning behind every major choice — why ClickHouse over PostgreSQL for logs, how the alert state machine works, why the rate limiter fails open, and what would change at production scale.
+
+## Key Design Decisions
+
+**Why Kafka?**
+The API publishes logs to Kafka and returns immediately — it never waits for the database. This decouples ingestion from storage, absorbs traffic spikes without backpressure on the API, and lets the consumer scale independently.
+
+**Why ClickHouse?**
+Log search is aggregation-heavy and read-heavy across millions of rows. ClickHouse's columnar storage scans only the columns needed and compresses data per-column — significantly faster than PostgreSQL for this workload.
+
+**Why tiered storage?**
+Storing everything in ClickHouse indefinitely is expensive. Logs older than 7 days are archived to S3 (cheap, queryable), then transitioned to Glacier via lifecycle policy after 90 days. The application manages the hot→warm transition; AWS manages warm→cold automatically.
+
+**Why reconstruct traces from logs instead of using Jaeger?**
+Logs are already the source of truth. Adding a dedicated tracing system would duplicate data and add infrastructure. Instead, traces are reconstructed by correlating logs using `request_id` and `span_id/parent_span_id` — simpler architecture, same end-to-end visibility.
+
+---
+
+## Engineering Tradeoffs
+
+- **ClickHouse over Elasticsearch** — Elasticsearch supports full-text search but adds significant operational overhead. ClickHouse covers the analytical query patterns (filter by service, level, time window) with less complexity.
+- **Custom stream processor over Flink/Kafka Streams** — A polling-based Python service computing 1-minute windows is sufficient at this scale and far simpler to reason about than a distributed stream processing framework.
+- **Traces from logs over Jaeger** — Avoided a dedicated tracing system by reusing the existing log data. The tradeoff is less flexibility for sampling and trace export, which matters at production scale but not here.
+- **Single EC2 over managed services** — Running everything on one instance with Docker Compose keeps the architecture demonstrable and cost-free. The same design decisions apply regardless of whether services run on EC2 or ECS.
 
 ---
 
