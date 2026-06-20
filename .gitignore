@@ -3,7 +3,7 @@ venv/
 __pycache__/
 *.pyc
 .pytest_cache/
-.DS_Sotre
+.DS_Store
 *.egg-info/
 dist/
 build/
@@ -11,12 +11,8 @@ build/
 .vscode/
 Project_Overview_and_Features.md
 Claude_Code_Session_Prompts.md
-./claude
-DESIGN_DECISIONS.md
-echo ".terraform/" >> .gitignore
-echo "terraform/.terraform/" >> .gitignore
-echo "*.tfstate" >> .gitignore
-echo "*.tfstate.backup" >> .gitignore
-git add .gitignore
-git add -A -- ':!terraform/.terraform'
-git commit -m "Add Terraform infra, benchmark script, updated docs and README"
+.claude
+.terraform/
+terraform/.terraform/
+*.tfstate
+*.tfstate.backup

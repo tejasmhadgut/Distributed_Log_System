@@ -1,40 +1,21 @@
 # Distributed Log Analytics Platform
 
-A production-grade log analytics platform built from scratch. Ingests logs via Kafka, stores them in a three-tier architecture (ClickHouse → S3 → Glacier), computes real-time metrics, fires alerts, and provides a React dashboard for live observability.
+A self-hosted observability system built to explore high-throughput log ingestion, stream processing, distributed tracing, tiered storage, and real-time analytics — the kind of problems that sit at the core of systems like the ELK stack.
 
-**Live demo:** `http://18.191.36.209` — login with `admin` / `admin123` *(hosted on AWS EC2 free tier — may be stopped to avoid costs; run locally with docker-compose in under 2 minutes)*
+Built entirely from scratch, solo, and deployed on AWS EC2.
 
----
-
-## Performance
-
-| Metric | Result |
-|--------|--------|
-| Ingestion throughput | ~5,200 logs/sec (Kafka batching, batch size 1000, 50k logs) |
-| Hot-tier query latency (uncached) | ~51ms avg (ClickHouse columnar scan) |
-| Hot-tier query latency (cached) | ~34ms avg (Redis cache hit) |
-| Trace lookup latency | ~18ms avg |
-| Cache speedup | ~1.5x |
-| Stream processing window | 1 minute (30s grace period for late logs) |
-| Alert detection latency | ~2 minutes (2-window confirmation) |
+**Live demo:** `http://18.191.36.209` — login with `admin` / `admin123`
+*(hosted on AWS EC2 free tier — may be stopped to avoid costs; run locally with docker-compose in under 2 minutes)*
 
 ---
 
-## Features
+## What it does
 
-| Feature | Description |
-|---------|-------------|
-| **Log Ingestion** | Batch ingest via REST API → Kafka → ClickHouse (fire-and-forget) |
-| **Log Search** | Query by service, level, and time window across hot/warm tiers |
-| **Distributed Tracing** | Hierarchical span trees reconstructed from correlated logs |
-| **Stream Processing** | 1-minute tumbling windows with 30s grace period, per-service metrics |
-| **Alert System** | Rule-based alerting with multi-window confirmation and webhook delivery |
-| **Tiered Storage** | Hot (ClickHouse <7d) → Warm (S3 7-90d) → Cold (Glacier 90-365d via lifecycle policy) |
-| **JWT Auth** | Access tokens (15min) + refresh tokens (7 days) with rotation |
-| **RBAC** | Role-based permissions (admin / user / viewer) enforced per endpoint |
-| **Rate Limiting** | Token bucket algorithm per user in Redis (60 req/min, fail-open) |
-| **WebSocket Dashboard** | Live metrics, active alerts with expandable error logs |
-| **React UI** | Log search, trace viewer, alert rule management, user management |
+- Ingests logs via a fire-and-forget Kafka pipeline and stores them across a hot-warm-cold tier (ClickHouse → S3 → Glacier)
+- Aggregates per-service metrics in real-time using 1-minute tumbling windows with late-event handling
+- Reconstructs distributed request traces from correlated logs across services
+- Fires alerts via webhooks when metrics breach configurable thresholds, with noise-reduction logic to prevent false positives
+- Serves a live React dashboard over WebSockets with search, trace viewer, and alert management
 
 ---
 
@@ -94,22 +75,33 @@ A production-grade log analytics platform built from scratch. Ingests logs via K
 
 ---
 
+## Performance
+
+Measured on a local machine using `benchmark.py` against a running docker-compose stack:
+
+- Sustained ingestion above **5,200 logs/sec** via Kafka batching
+- Hot-tier search latency: **~51ms** uncached (ClickHouse columnar scan), **~34ms** cached (Redis)
+- Trace lookup: **~18ms** average
+
+See [DETAILS.md](DETAILS.md) for full benchmark methodology and numbers.
+
+---
+
 ## Tech Stack
 
 | Layer | Technology | Why |
 |-------|-----------|-----|
-| API | FastAPI (Python) | Async, fast, automatic OpenAPI docs |
-| Message queue | Apache Kafka | Decouples ingestion from storage, handles spikes |
-| Hot storage | ClickHouse | Columnar DB, 10-100x faster than PostgreSQL for log queries |
+| API | FastAPI (Python) | Async, automatic OpenAPI docs |
+| Message queue | Apache Kafka | Decouples ingestion from storage, absorbs traffic spikes |
+| Hot storage | ClickHouse | Columnar DB optimized for analytical log queries |
 | Warm storage | AWS S3 (JSONL) | Cheap, durable, queryable without restore |
-| Cold storage | AWS Glacier | Lifecycle policy from S3, near-zero cost for rarely accessed data |
-| Relational DB | PostgreSQL | Transactional data: users, alert rules, alerts, archive metadata |
-| Cache | Redis | Query cache (5-10 min TTL) + token bucket rate limiting |
+| Cold storage | AWS Glacier | Lifecycle policy from S3, near-zero cost |
+| Relational DB | PostgreSQL | Transactional data: users, alert rules, archive metadata |
+| Cache | Redis | Query cache + token bucket rate limiting |
 | Frontend | React + Vite | Component-based UI, fast dev server |
-| Charts | Recharts | Lightweight React chart library |
-| Real-time | WebSocket (native) | Server pushes metrics every 5s, no polling overhead |
+| Real-time | WebSocket (native) | Server pushes metrics every 5s, no polling |
 | Auth | JWT + bcrypt | Stateless access tokens, bcrypt password hashing |
-| Infra | Docker Compose | Single command local setup for all 8 services |
+| Infra | Docker Compose + Terraform | Local setup + AWS provisioning |
 
 ---
 
@@ -137,124 +129,53 @@ npm run dev
 # → http://localhost:5173
 ```
 
-**Default credentials:** `admin` / `admin123` — change immediately in any real deployment.
-
-**Services started by docker-compose:**
-
-| Service | Port | Description |
-|---------|------|-------------|
-| FastAPI | 8000 | REST API + WebSocket |
-| PostgreSQL | 5432 | Relational data |
-| ClickHouse | 9000/8123 | Log and metrics storage |
-| Redis | 6379 | Cache + rate limiting |
-| Kafka | 9092 | Log message queue |
-| Zookeeper | 2181 | Kafka coordinator |
-| Consumer | — | Kafka → ClickHouse batch writer |
-| Stream Processor | — | Computes 1-min metric windows |
-| Alert Processor | — | Evaluates alert rules, fires webhooks |
-| Archiver | — | ClickHouse → S3 archival |
+**Default credentials:** `admin` / `admin123`
 
 ---
 
-## API Reference
+## API
 
-All endpoints except `/auth/login`, `/auth/register`, and `/health` require `Authorization: Bearer <token>`.
+Full OpenAPI docs available at `http://localhost:8000/docs` when running locally.
 
-### Auth
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/auth/login` | Get access + refresh tokens |
-| POST | `/auth/register` | Self-register (gets viewer role) |
-| POST | `/auth/refresh` | Rotate refresh token |
-| POST | `/auth/logout` | Revoke refresh token |
+Core endpoints:
 
-### Logs
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/logs/ingest` | Batch ingest logs |
-| GET | `/logs/search?service=&level=&hours=&tier=` | Search logs (hot or warm tier) |
-
-### Traces
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/traces/{request_id}` | Full span tree for a request |
-| GET | `/traces/{request_id}/summary` | Aggregated trace stats |
-
-### Alerts & Rules
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/alerts` | List alerts (filter by state, service) |
-| PUT | `/alerts/{id}/acknowledge` | Acknowledge a firing alert |
-| GET | `/alert_rules` | List all rules |
-| POST | `/alert_rules` | Create rule |
-| PUT | `/alert_rules/{id}` | Update threshold or enabled state |
-| DELETE | `/alert_rules/{id}` | Delete rule |
-
-### Users
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/users` | List all users (admin only) |
-| PUT | `/users/{id}/role` | Change user role (admin only) |
-| PUT | `/users/{id}/deactivate` | Deactivate user (admin only) |
-
-### WebSocket
-| Endpoint | Description |
-|----------|-------------|
-| `ws://host/ws/metrics` | Live metrics push every 5s (no auth required) |
+- `POST /logs/ingest` — batch ingest logs
+- `GET /logs/search` — search by service, level, time window, tier
+- `GET /traces/{request_id}` — full span tree for a request
+- `POST /alert_rules` / `GET /alert_rules` — manage alert rules
+- `GET /alerts` — list firing and resolved alerts
+- `ws://host/ws/metrics` — live metrics over WebSocket
 
 ---
 
 ## Project Structure
 
 ```
-├── src/
-│   ├── main.py                  # FastAPI app, lifespan, router registration
-│   ├── config/settings.py       # Pydantic BaseSettings (typed env vars)
-│   ├── core/
-│   │   ├── auth.py              # JWT encode/decode, bcrypt
-│   │   ├── exceptions.py        # Custom exception hierarchy
-│   │   ├── middleware.py        # Standardized error response handler
-│   │   └── rate_limiter.py      # Token bucket algorithm
-│   ├── db/
-│   │   ├── postgres.py          # Connection pool, all PG queries
-│   │   └── clickhouse.py        # ClickHouse client, log/metrics queries
-│   ├── api/
-│   │   ├── dependencies.py      # get_current_user, require_permission, rate_limit
-│   │   └── routers/             # One file per resource
-│   ├── services/
-│   │   ├── auth_service.py      # Login, refresh, logout, register
-│   │   ├── cache_service.py     # Redis read/write helpers
-│   │   ├── s3_service.py        # Warm tier S3 reads
-│   │   └── webhook_service.py   # Alert webhook delivery
-│   ├── models/                  # Pydantic request/response models
-│   └── workers/
-│       ├── consumer.py          # Kafka → ClickHouse batch writer
-│       ├── stream_processor.py  # 1-min metric windows
-│       ├── alert_processor.py   # Rule evaluation + webhook trigger
-│       └── archiver.py          # ClickHouse → S3 archival
-├── dashboard/                   # React + Vite frontend
-│   └── src/
-│       ├── pages/               # Logs, Traces, Rules, Users
-│       ├── components/          # ServiceCard, AlertsList, MetricsChart
-│       └── hooks/useWebSocket.js
-├── docker-compose.yml
-├── requirements.txt
-├── DESIGN_DECISIONS.md          # Detailed reasoning behind every design choice
-└── README.md
+src/
+├── api/          # FastAPI routers + dependency chain (auth, rate limit)
+├── core/         # JWT, exceptions, middleware, rate limiter
+├── db/           # ClickHouse + PostgreSQL clients
+├── services/     # Cache, S3, webhook, auth logic
+├── workers/      # Consumer, stream processor, alert processor, archiver
+└── models/       # Pydantic request/response models
+
+dashboard/        # React + Vite frontend
+docker-compose.yml
+terraform/        # AWS EC2, S3, IAM provisioning
 ```
 
 ---
 
 ## Design Decisions
 
-See [DESIGN_DECISIONS.md](DESIGN_DECISIONS.md) for detailed reasoning behind every major architectural and implementation choice — from why ClickHouse over PostgreSQL for logs, to how token bucket rate limiting works, to why self-registration was chosen over invite-only.
+See [DESIGN_DECISIONS.md](DESIGN_DECISIONS.md) for the reasoning behind every major choice — why ClickHouse over PostgreSQL for logs, how the alert state machine works, why the rate limiter fails open, and what would change at production scale.
 
 ---
 
 ## Future Improvements
 
-- Cold tier query with Glacier restore (initiate restore → poll status → download)
+- Cold tier query with Glacier restore (initiate restore → poll → download)
 - WebSocket authentication (token as query param on connect)
-- Log search within trace view (filter logs by request_id without leaving trace viewer)
+- Log search within trace view (filter by request_id without leaving trace viewer)
 - Multi-tenant support (isolate data per organization)
 - Kafka partition scaling (currently single partition)
