@@ -16,3 +16,5 @@ Claude_Code_Session_Prompts.md
 terraform/.terraform/
 *.tfstate
 *.tfstate.backup
+DESIGN_DECISIONS.md
+DETAILS.md
