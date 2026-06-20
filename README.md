@@ -21,57 +21,7 @@ Built entirely from scratch, solo, and deployed on AWS EC2.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        INGESTION                            │
-│                                                             │
-│   REST API  ──►  Kafka (topic: logs)  ──►  Consumer        │
-│   (FastAPI)       fire-and-forget         batch 100 / 5s   │
-│                                               │             │
-│                                               ▼             │
-│                                          ClickHouse         │
-│                                          (hot: <7 days)     │
-└─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│                       PROCESSING                            │
-│                                                             │
-│   Stream Processor  ──►  1-min windows  ──►  metrics table │
-│   (polls ClickHouse)      30s grace          per service   │
-│                                                             │
-│   Alert Processor   ──►  check rules   ──►  webhook POST   │
-│   (polls every 2min)      2-window confirm   PostgreSQL     │
-│                                                             │
-│   Archiver          ──►  S3 JSONL      ──►  delete from CH │
-│   (every 5min)            warm/YYYY/MM/DD    if confirmed   │
-└─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│                        STORAGE                              │
-│                                                             │
-│   ClickHouse  ── hot ──  <7 days   fast queries            │
-│   S3          ── warm ── 7-90 days JSONL, queryable        │
-│   Glacier     ── cold ── 90-365d   lifecycle policy        │
-│                                                             │
-│   PostgreSQL  ── alert rules, alerts, users, archive meta  │
-│   Redis       ── search/trace cache, rate limit buckets    │
-└─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│                         API + UI                            │
-│                                                             │
-│   FastAPI  ──  REST endpoints (auth, logs, traces,         │
-│                alerts, rules, users)                        │
-│           ──  WebSocket /ws/metrics  ──►  React Dashboard  │
-│                                                             │
-│   React Dashboard (Vite)                                    │
-│   ├── Dashboard  live metrics + alerts (WebSocket)         │
-│   ├── Logs       search with filters, click → trace        │
-│   ├── Traces     span tree viewer per request ID           │
-│   ├── Rules      create / enable / delete alert rules      │
-│   └── Users      role management, deactivate accounts      │
-└─────────────────────────────────────────────────────────────┘
-```
+![Architecture Diagram](assets/Architecture.png)
 
 ---
 
