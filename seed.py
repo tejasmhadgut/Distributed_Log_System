@@ -28,7 +28,7 @@ def get_existing_rules(host, headers):
 
 def seed_rules(host, token):
     headers = {"Authorization": f"Bearer {token}"}
-    existing = get_existing_rules(host, headers)
+    existing = get_existing_rules(host, headers).get("rules", [])
     existing_keys = {(r["service_name"], r["metric_type"]) for r in existing}
 
     created = 0
